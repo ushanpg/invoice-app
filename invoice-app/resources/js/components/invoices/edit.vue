@@ -1,49 +1,77 @@
 <script setup>
+import axios from 'axios'
 import { onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 
-const router = useRouter();
+const router = useRouter()
 
-let form = ref([])
 let allcustomers = ref([])
-let customer_id = ref([])
-let listCart = ref([])
 let showModel = ref(false)
-let listproducts =ref([])
+let listproducts = ref([])
+
+let form = ref({ id: '' })
+
+const props = defineProps({
+    id: {
+        type: String,
+        default:''
+    }
+})
 
 onMounted(async () => {
-    indexForm()
+    getInvoice()
     getAllCustomers()
     getProducts()
 })
 
-const indexForm = async () => {
-    let response = await axios.get("/api/create_invoice")
-    form.value = response.data
+const getInvoice = async () => {
+    const apiUrl = '/api/edit_invoice/'+ props.id
+    let response = await axios.get(apiUrl)
+    form.value = response.data.invoice
 }
+
 const getAllCustomers = async () => {
     let response = await axios.get("/api/customers")
     allcustomers.value = response.data.customers
 }
 
+const deleteInvoiceItem = (id, i) => {
+    form.value.invoice_items.splice(i, 1)
+    if (id != undefined) {
+        axios.get("/api/delete_invoice_items/"+id)
+    }
+}
+
 const addCart = (item) => {
     const itemCart = {
-        id: item.id,
+        product_id: item.id,
         item_code: item.item_code,
         description: item.description,
         unit_price: item.unit_price,
         quantity: item.quantity
     }
-    listCart.value.push(itemCart)
+    form.value.invoice_items.push(itemCart)
     openModel()
-}
-
-const removeItem = (i) => {
-    listCart.value.splice(i,1)
 }
 
 const openModel = () => {
     showModel.value = !showModel.value
+}
+
+const subTotal = () => {
+        let total = 0
+    if (form.value.invoice_items) {
+        form.value.invoice_items.map((data) => {
+            total = total + (data.quantity * data.unit_price)
+        })
+    }
+        return total
+}
+
+const total = () => {
+    if (form.value.invoice_items) {
+        return subTotal() - form.value.discount
+    }
 }
 
 const getProducts = async () => {
@@ -51,20 +79,8 @@ const getProducts = async () => {
     listproducts.value = response.data.products
 }
 
-const subTotal = () => {
-    let total = 0
-    listCart.value.map((data)=> {
-        total = total + (data.quantity*data.unit_price)
-    })
-    return total
-}
-
-const total = () => {
-    return subTotal() - form.value.discount
-}
-
 const onSave = () => {
-    if (listCart.value.length >= 1) {
+    if (form.value.invoice_items.length >= 1) {
         let subtotal = 0
         subtotal = subTotal()
 
@@ -72,8 +88,8 @@ const onSave = () => {
         Total = total()
 
         const formData = new FormData()
-        formData.append('invoice_item', JSON.stringify(listCart.value))
-        formData.append('customer_id', customer_id.value)
+        formData.append('invoice_item', JSON.stringify(form.value.invoice_items))
+        formData.append('customer_id', form.value.customer_id)
         formData.append('date', form.value.date)
         formData.append('due_date', form.value.due_date)
         formData.append('number', form.value.number)
@@ -82,9 +98,8 @@ const onSave = () => {
         formData.append('subtotal', subtotal)
         formData.append('total', Total)
         formData.append('terms_and_conditions', form.value.terms_and_conditions)
-        
-        axios.post("/api/add_invoice", formData)
-        listCart.value = []
+        axios.post("/api/update_invoice/"+form.value.id, formData)
+        form.value.invoice_items = []
         router.push('/')
     }
 }
@@ -92,11 +107,11 @@ const onSave = () => {
 
 <template>
     <div class="container">
-         <div class="invoices">
+           <div class="invoices">
         
         <div class="card__header">
             <div>
-                <h2 class="invoice__title">New Invoice</h2>
+                <h2 class="invoice__title">Edit Invoice</h2>
             </div>
             <div>
                 
@@ -107,14 +122,14 @@ const onSave = () => {
             <div class="card__content--header">
                 <div>
                     <p class="my-1">Customer</p>
-                    <select name="" id="" class="input" v-model="customer_id">
+                    <select name="" id="" class="input" v-model="form.customer_id">
                         <option disabled>Select customer</option>
                         <option :value="customer.id" v-for="customer in allcustomers" :key="customer.id">{{ customer.first_name }}</option>
                     </select>
                 </div>
                 <div>
                     <p class="my-1">Date</p> 
-                    <input id="date" type="date" class="input" v-model="form.date"> <!---->
+                    <input id="date" placeholder="dd-mm-yyyy" type="date" class="input" v-model="form.date"> <!---->
                     <p class="my-1">Due Date</p> 
                     <input id="due_date" type="date" class="input" v-model="form.due_date">
                 </div>
@@ -137,8 +152,9 @@ const onSave = () => {
                 </div>
     
                 <!-- item 1 -->
-                <div class="table--items2" v-for="(itemCart, i) in listCart" :key="itemCart.id">
-                    <p>{{ itemCart.item_code }} {{ itemCart.description }}</p>
+                <div class="table--items2" v-for="(itemCart, i) in form.invoice_items" :key="itemCart.id">
+                    <p v-if="itemCart.product"> # {{ itemCart.product.item_code }} {{ itemCart.product.description }}</p>
+                    <p v-else> {{ itemCart.item_code }} {{ itemCart.description }} </p>
                     <p>
                         <input type="text" class="input" v-model="itemCart.unit_price">
                     </p>
@@ -149,7 +165,7 @@ const onSave = () => {
                         $ {{ itemCart.unit_price * itemCart.quantity}}
                     </p>
                     <p v-else></p>
-                    <p style="color: red; font-size: 24px;cursor: pointer;" @click="removeItem(i)">
+                    <p style="color: red; font-size: 24px;cursor: pointer;" @click="deleteInvoiceItem(itemCart.id, i)">
                         &times;
                     </p>
                 </div>
